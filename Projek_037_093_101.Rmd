@@ -1,0 +1,461 @@
+---
+title: "ProjekAkhir"
+output: pdf_document
+date: "2024-11-30"
+---
+
+#Anggota Kelompok
+#Baiq Afifah Hanum / 123220037
+#Naufal Laudza Rochmadi / 123220093
+#Sakti Maulana Ibrahim / 123220101
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# ImportLibrary dan Dataset
+
+```{r}
+library(tidyverse)
+library(caret)
+library(randomForest)
+library(here)
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(shiny)
+library(shinydashboard)
+
+
+```
+
+
+##Mengimpor Dataset
+```{r}
+data <- read_excel("DataPencemaranUdara.xlsx")
+print(head(data))
+
+```
+
+##Memahami Struktur data
+```{r}
+str(data)      # Struktur dataset
+summary(data)  # Statistik deskriptif
+head(data)     
+
+```
+
+#DataPreprocessing
+
+## Menghapus tanggal yang kosong
+```{r}
+data = data[!is.na(data$tanggal), ]
+```
+
+## Menghapus kategori tidak ada data
+
+```{r}
+data = data[data$categori != "TIDAK ADA DATA", ]
+```
+
+
+```{r}
+data = data[data$categori != "SANGAT TIDAK SEHAT", ]
+```
+##Ubah nama baik menjadi sehat
+```{r}
+# Ubah nama kategori "Baik" menjadi "Sehat"
+data = data %>%
+  mutate(categori = ifelse(categori == "BAIK", "SEHAT", categori))
+
+str(data)
+```
+
+
+
+##Konversi Kolom Numerik
+```{r}
+data$pm10 = as.numeric(data$pm10)
+data$so2 = as.numeric(data$so2)
+data$co = as.numeric(data$co)
+data$o3 = as.numeric(data$o3)
+data$no2 = as.numeric(data$no2)
+
+```
+
+##ubah tipe kategori ke factor
+```{r}
+data$categori = as.factor(data$categori)
+
+str(data)      # Struktur dataset
+summary(data)
+```
+
+##Mengganti kolom yang bernilai NA menjadi rata-rata(mean)
+
+```{r}
+data_cleansing <- data %>%
+  mutate(
+    pm10 = round(ifelse(is.na(pm10), mean(pm10, na.rm = TRUE), pm10), 2),
+    so2 = round(ifelse(is.na(so2), mean(so2, na.rm = TRUE), so2), 2),
+    co = round(ifelse(is.na(co), mean(co, na.rm = TRUE), co), 2),
+    o3 = round(ifelse(is.na(o3), mean(o3, na.rm = TRUE), o3), 2),
+    no2 = round(ifelse(is.na(no2), mean(no2, na.rm = TRUE), no2), 2)
+  )
+```
+
+
+##Cek kembali
+```{r}
+colSums(is.na(data_cleansing))
+```
+
+```{r}
+data_siap = data_cleansing %>% select(-tanggal, -periode_data, -stasiun, -critical, -max)
+```
+
+#Exploratory Data Analysis
+
+#Distribusi Kategori
+```{r}
+# Pie chart dengan tampilan yang lebih bagus
+library(scales)  # Untuk label persentase
+
+# Hitung persentase kategori
+pie_data <- data_siap %>%
+  group_by(categori) %>%
+  summarise(count = n()) %>%
+  mutate(percentage = count / sum(count) * 100)  # Tambahkan kolom persentase
+
+# Plot pie chart
+ggplot(pie_data, aes(x = "", y = count, fill = categori)) +
+  geom_bar(stat = "identity", width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  geom_text(aes(label = paste0(round(percentage, 1), "%")), 
+            position = position_stack(vjust = 0.5), 
+            size = 5, color = "white") +
+  scale_fill_brewer(palette = "Set2") +  # Gunakan palet warna yang harmonis
+  labs(
+    title = "Proporsi Kategori Udara",
+    fill = "Kategori"
+  ) +
+  theme_void() +  # Hapus grid dan background
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10)
+  )
+
+```
+
+```{r}
+ggplot(bar_data, aes(x = reorder(categori, -count), y = count, fill = categori)) +
+  geom_bar(stat = "identity", color = "white", width = 0.8) +
+  geom_text(aes(label = paste0(round(percentage, 1), "%")), 
+            vjust = -0.3,  # Tambahkan padding agar teks tidak terpotong
+            size = 5, 
+            color = "black") +
+  scale_fill_brewer(palette = "Set2") +  # Palet warna harmonis
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +  # Tambahkan ruang di atas
+  labs(
+    title = "Distribusi Kategori Udara",
+    x = "Kategori",
+    y = "Jumlah",
+    fill = "Kategori"
+  ) +
+  theme_minimal() +  # Tema sederhana
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.title.y = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(size = 10, angle = 45, hjust = 1),
+    axis.text.y = element_text(size = 10),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10)
+  )
+```
+
+
+#histogram penyebaran data
+```{r}
+# Visualisasi Distribusi Variabel Polutan dengan ggplot2
+library(ggplot2)
+
+# List variabel polutan
+pollutants <- c("pm10", "so2", "co", "o3", "no2")
+
+# Membuat dataframe dalam format long (lebih cocok untuk ggplot)
+data_long <- data_siap %>%
+  select(all_of(pollutants)) %>%
+  pivot_longer(cols = everything(), names_to = "Pollutant", values_to = "Value")
+
+# Membuat histogram dengan ggplot
+ggplot(data_long, aes(x = Value, fill = Pollutant)) +
+  geom_histogram(bins = 30, color = "white", alpha = 0.8) +
+  facet_wrap(~ Pollutant, scales = "free", ncol = 2) + # Plot terpisah untuk setiap polutan
+  labs(
+    title = "Distribusi Variabel Polutan",
+    x = "Konsentrasi",
+    y = "Frekuensi"
+  ) +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set2") +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"), # Membuat judul facet lebih jelas
+    legend.position = "none" # Menghilangkan legend (karena label sudah di facet)
+  )
+
+
+```
+
+
+
+#Boxplot
+```{r}
+# Mengubah data menjadi format long
+data_long <- data_siap %>%
+  select(pm10, so2, co, o3, no2) %>%
+  pivot_longer(cols = everything(), names_to = "Pollutant", values_to = "Value")
+
+# Membuat boxplot menggunakan ggplot
+ggplot(data_long, aes(x = Pollutant, y = Value, fill = Pollutant)) +
+  geom_boxplot(outlier.colour = "red", outlier.shape = 16, outlier.size = 2) +
+  labs(
+    title = "Boxplot untuk Setiap Variabel Polutan",
+    x = "Pollutant",
+    y = "Konsentrasi"
+  ) +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set2") +
+  theme(
+    legend.position = "none",  # Menghilangkan legend
+    axis.text.x = element_text(angle = 45, hjust = 1)  # Rotasi label sumbu x
+  )
+
+```
+
+
+```{r}
+# Korelasi dan heatmap dengan tampilan lebih bagus
+library(ggplot2)
+
+# Hitung matriks korelasi
+cor_matrix <- cor(data_siap[, pollutants])
+
+# Ubah ke format long untuk visualisasi
+melted_cor_matrix <- melt(cor_matrix)
+
+# Plot heatmap
+ggplot(data = melted_cor_matrix, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +  # Tile dengan border putih untuk pemisahan
+  geom_text(aes(label = round(value, 2)), color = "black", size = 4) +  # Tambahkan nilai korelasi
+  scale_fill_gradient2(
+    low = "red", high = "blue", mid = "white", 
+    midpoint = 0, limit = c(-1, 1), space = "Lab", 
+    name = "Korelasi"
+  ) +
+  labs(
+    title = "Heatmap Korelasi Antar Polutan",
+    x = "Polutan",
+    y = "Polutan",
+    fill = "Korelasi"
+  ) +
+  theme_minimal() +  # Tema sederhana namun bersih
+  theme(
+    plot.title = element_text(size = 16, hjust = 0.5),  # Judul lebih besar dan di tengah
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 10),  # Rotasi label X
+    axis.text.y = element_text(size = 10),  # Ukuran teks Y
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10)
+  )
+
+```
+
+```{r}
+print(head(data_siap))
+```
+
+
+#Data Splitting
+
+## membagi ke dalam training data dan test data
+```{r}
+# Proporsi split: 80% training, 20% testing
+set.seed(3793101)  # Untuk hasil yang konsisten
+train_index = createDataPartition(data_siap$categori, p = 0.8, list = FALSE)
+
+# Subset data
+train_data = data_siap[train_index, ]
+test_data = data_siap[-train_index, ]
+
+```
+
+#Model Building
+```{r}
+model_rf = randomForest(categori ~ pm10 + so2 + co + o3 + no2, 
+                         data = train_data, 
+                         importance = TRUE, 
+                         ntree = 100)  # Jumlah pohon dalam random forest
+
+```
+
+##melihat random forest
+```{r}
+# Ringkasan model
+print(model_rf)
+
+# Ringkasan lebih detail
+summary(model_rf)
+```
+
+# Evaluasi Model
+
+```{r}
+predictions = predict(model_rf, test_data)
+
+```
+
+```{r}
+confusion_matrix = confusionMatrix(predictions, test_data$categori)
+print(confusion_matrix)
+```
+```{r}
+# Konversi matriks menjadi data frame
+cm_df <- as.data.frame(as.table(confusion_matrix$table))
+
+# ubah kolom agar lebih deskriptif
+colnames(cm_df) <- c("Actual", "Predicted", "Frequency")
+
+# Plot matriks kebingungan
+ggplot(cm_df, aes(x = Predicted, y = Actual, fill = Frequency)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Frequency), size = 5) +
+  scale_fill_gradient(low = "lightblue", high = "blue") +
+  labs(
+    title = "Confusion Matrix",
+    x = "Predicted",
+    y = "Actual",
+    fill = "Frequency"
+  ) +
+  theme_minimal()
+```
+
+
+
+```{r}
+ui <- dashboardPage(
+  dashboardHeader(title = "Analisis Pencemaran Udara"),
+  dashboardSidebar(disable = TRUE),
+  dashboardBody(
+    fluidRow(
+      column(4,
+        valueBoxOutput("total_data", width = 12),
+        valueBoxOutput("total_sehat", width = 12),
+        valueBoxOutput("total_sedang", width = 12),
+        valueBoxOutput("total_tidak_sehat", width = 12),
+        box(
+          title = "Prediksi Kategori Udara", 
+          width = 12,
+          status = "warning", 
+          solidHeader = TRUE,
+          column(12, numericInput("pm10", "PM10:", value = 50, min = 0)),
+          column(12, numericInput("so2", "SO2:", value = 10, min = 0)),
+          column(12, numericInput("co", "CO:", value = 1, min = 0)),
+          column(12, numericInput("o3", "O3:", value = 20, min = 0)),
+          column(12, numericInput("no2", "NO2:", value = 15, min = 0)),
+          column(12, actionButton("predict_btn", "Prediksi Kategori", class = "btn-primary")),
+          column(12, textOutput("prediction_result"))
+        )
+      ),
+      column(8,
+        box(
+          title = "Hubungan Variabel Polusi", 
+          width = 12,
+          status = "primary", 
+          solidHeader = TRUE,
+          fluidRow(
+            column(4, 
+              selectInput("x_var", "Variabel X:", 
+                choices = c("PM10" = "pm10", "SO2" = "so2", 
+                            "CO" = "co", "O3" = "o3", "NO2" = "no2"),
+                selected = "pm10")
+            ),
+            column(4, 
+              selectInput("y_var", "Variabel Y:", 
+                choices = c("PM10" = "pm10", "SO2" = "so2", 
+                            "CO" = "co", "O3" = "o3", "NO2" = "no2"),
+                selected = "no2")
+            ),
+            column(4,
+              checkboxInput("show_category", "Tampilkan Kategori", value = TRUE)
+            )
+          ),
+          plotOutput("dynamic_scatter_plot", height = "350px")
+        )
+      )
+    )
+  )
+)
+
+server <- function(input, output) {
+  output$total_data <- renderValueBox({
+    valueBox("Total Data", nrow(data_siap), icon = icon("database"), color = "blue")
+  })
+  
+  output$total_sehat <- renderValueBox({
+    valueBox("Total Sehat", sum(data_siap$categori == "SEHAT"), icon = icon("check-circle"), color = "green")
+  })
+  
+  output$total_sedang <- renderValueBox({
+    valueBox("Total Sedang", sum(data_siap$categori == "SEDANG"), icon = icon("minus-circle"), color = "yellow")
+  })
+  
+  output$total_tidak_sehat <- renderValueBox({
+    valueBox("Total Tidak Sehat", sum(data_siap$categori == "TIDAK SEHAT"), icon = icon("times-circle"), color = "red")
+  })
+  
+  output$dynamic_scatter_plot <- renderPlot({
+    req(input$x_var != input$y_var)
+    
+    p <- ggplot(data_siap, aes_string(x = input$x_var, y = input$y_var))
+    
+    if(input$show_category) {
+      p <- p + geom_point(aes(color = categori), alpha = 0.7, size = 3) +
+        scale_color_manual(values = c("SEHAT" = "green", "SEDANG" = "yellow", "TIDAK SEHAT" = "red"), name = "Kategori")
+    } else {
+      p <- p + geom_point(alpha = 0.7, size = 3)
+    }
+    
+    p + 
+      labs(
+        title = paste("Hubungan", input$x_var, "dan", input$y_var),
+        x = input$x_var,
+        y = input$y_var
+      ) +
+      theme_minimal()
+  })
+  
+  prediction <- eventReactive(input$predict_btn, {
+    user_input <- data.frame(
+      pm10 = input$pm10,
+      so2 = input$so2,
+      co = input$co,
+      o3 = input$o3,
+      no2 = input$no2
+    )
+    
+    predict(model_rf, user_input)
+  })
+  
+  output$prediction_result <- renderText({
+    req(prediction())
+    paste("Hasil Prediksi: Kategori Udara adalah", prediction())
+  })
+}
+
+shinyApp(ui, server)
+
+
+```
+
